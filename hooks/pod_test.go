@@ -200,6 +200,39 @@ func TestMutateGetPhysical(t *testing.T) {
 	}
 }
 
+func TestMutateVirtualReadPathsRestoreVNodeNodeName(t *testing.T) {
+	hook := &vnodePodHook{}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+			Labels: map[string]string{
+				vnodeNodeNameLabel: "vnode-abc-1",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "k8s-master-01"},
+	}
+
+	t.Run("get virtual", func(t *testing.T) {
+		result, err := hook.MutateGetVirtual(context.Background(), pod.DeepCopy())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := result.(*corev1.Pod).Spec.NodeName; got != "vnode-abc-1" {
+			t.Fatalf("expected vnode nodeName, got %q", got)
+		}
+	})
+
+	t.Run("update virtual", func(t *testing.T) {
+		result, err := hook.MutateUpdateVirtual(context.Background(), pod.DeepCopy())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := result.(*corev1.Pod).Spec.NodeName; got != "vnode-abc-1" {
+			t.Fatalf("expected vnode nodeName, got %q", got)
+		}
+	})
+}
+
 func TestMutateGetPhysicalWithNilLabels(t *testing.T) {
 	hook := &vnodePodHook{}
 	pod := &corev1.Pod{

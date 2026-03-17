@@ -59,6 +59,23 @@ func (h *vnodePodHook) MutateCreatePhysical(_ context.Context, obj client.Object
 var _ plugin.MutateGetPhysical = &vnodePodHook{}
 
 func (h *vnodePodHook) MutateGetPhysical(_ context.Context, obj client.Object) (client.Object, error) {
+	return restoreVNodeNodeName(obj)
+}
+
+// MutateGetVirtual and MutateUpdateVirtual normalize the synced pod back to the
+// original vnode nodeName on host-to-virtual reconciliation paths.
+var _ plugin.MutateGetVirtual = &vnodePodHook{}
+var _ plugin.MutateUpdateVirtual = &vnodePodHook{}
+
+func (h *vnodePodHook) MutateGetVirtual(_ context.Context, obj client.Object) (client.Object, error) {
+	return restoreVNodeNodeName(obj)
+}
+
+func (h *vnodePodHook) MutateUpdateVirtual(_ context.Context, obj client.Object) (client.Object, error) {
+	return restoreVNodeNodeName(obj)
+}
+
+func restoreVNodeNodeName(obj client.Object) (client.Object, error) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return nil, fmt.Errorf("expected Pod, got %T", obj)
