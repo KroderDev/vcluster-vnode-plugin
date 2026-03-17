@@ -1,0 +1,24 @@
+.git
+.gitignore
+
+# Editor/IDE
+.vscode
+.idea
+
+# CI / GitHub metadata (not needed for image build)
+.github
+
+# Local build outputs
+bin
+dist
+out
+coverage*
+*.out
+*.test
+
+# Go tooling caches (usually outside repo, but safe)
+**/.cache
+
+# OS junk
+.DS_Store
+Thumbs.db
