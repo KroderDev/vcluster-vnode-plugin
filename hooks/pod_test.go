@@ -24,21 +24,23 @@ func TestMutateCreatePhysical(t *testing.T) {
 	hook := &vnodePodHook{}
 
 	tests := []struct {
-		name         string
-		nodeName     string
-		wantClear    bool
-		wantLabel    string
+		name            string
+		nodeName        string
+		initialLabels   map[string]string
+		wantClear       bool
+		wantLabel       string
+		wantLabelsUnchg bool
 	}{
-		{"no nodeName", "", false, ""},
-		{"non-vnode nodeName", "worker-1", false, ""},
-		{"vnode nodeName", "vnode-abc-1", true, "vnode-abc-1"},
-		{"vnode prefix only", "vnode-x", true, "vnode-x"},
+		{name: "no nodeName", nodeName: "", wantClear: false, wantLabel: "", wantLabelsUnchg: true},
+		{name: "non-vnode nodeName", nodeName: "worker-1", initialLabels: map[string]string{"app": "demo"}, wantClear: false, wantLabel: "", wantLabelsUnchg: true},
+		{name: "vnode nodeName", nodeName: "vnode-abc-1", wantClear: true, wantLabel: "vnode-abc-1"},
+		{name: "vnode prefix only", nodeName: "vnode-x", wantClear: true, wantLabel: "vnode-x"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default", Labels: tt.initialLabels},
 				Spec:       corev1.PodSpec{NodeName: tt.nodeName},
 			}
 
@@ -48,6 +50,9 @@ func TestMutateCreatePhysical(t *testing.T) {
 			}
 
 			resultPod := result.(*corev1.Pod)
+			if resultPod != pod {
+				t.Fatalf("expected pod to be mutated in place")
+			}
 			if tt.wantClear {
 				if resultPod.Spec.NodeName != "" {
 					t.Errorf("expected empty nodeName, got %q", resultPod.Spec.NodeName)
@@ -58,6 +63,16 @@ func TestMutateCreatePhysical(t *testing.T) {
 			} else {
 				if resultPod.Spec.NodeName != tt.nodeName {
 					t.Errorf("expected nodeName %q unchanged, got %q", tt.nodeName, resultPod.Spec.NodeName)
+				}
+				if tt.wantLabelsUnchg {
+					if len(resultPod.Labels) != len(tt.initialLabels) {
+						t.Fatalf("expected labels to remain unchanged, got %#v", resultPod.Labels)
+					}
+					for k, v := range tt.initialLabels {
+						if got := resultPod.Labels[k]; got != v {
+							t.Fatalf("expected label %q=%q to remain unchanged, got %q", k, v, got)
+						}
+					}
 				}
 			}
 		})
@@ -104,8 +119,42 @@ func TestMutateCreatePhysicalRejectsNonPod(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for non-pod object")
 	}
+	if got := err.Error(); got != "expected Pod, got *v1.ConfigMap" {
+		t.Fatalf("unexpected error message: %q", got)
+	}
 	if result != nil {
 		t.Fatalf("expected nil result for non-pod object, got %T", result)
+	}
+}
+
+func TestMutateCreatePhysicalOverwritesExistingVNodeLabel(t *testing.T) {
+	hook := &vnodePodHook{}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+			Labels: map[string]string{
+				vnodeNodeNameLabel: "stale-value",
+				"app":              "demo",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "vnode-fresh"},
+	}
+
+	result, err := hook.MutateCreatePhysical(context.Background(), pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resultPod := result.(*corev1.Pod)
+	if resultPod != pod {
+		t.Fatalf("expected pod to be mutated in place")
+	}
+	if got := resultPod.Labels[vnodeNodeNameLabel]; got != "vnode-fresh" {
+		t.Fatalf("expected vnode label to be overwritten, got %q", got)
+	}
+	if got := resultPod.Labels["app"]; got != "demo" {
+		t.Fatalf("expected unrelated labels to remain intact, got %q", got)
 	}
 }
 
@@ -141,10 +190,37 @@ func TestMutateGetPhysical(t *testing.T) {
 			}
 
 			resultPod := result.(*corev1.Pod)
+			if resultPod != pod {
+				t.Fatalf("expected pod to be mutated in place")
+			}
 			if resultPod.Spec.NodeName != tt.wantNodeName {
 				t.Errorf("expected nodeName %q, got %q", tt.wantNodeName, resultPod.Spec.NodeName)
 			}
 		})
+	}
+}
+
+func TestMutateGetPhysicalWithNilLabels(t *testing.T) {
+	hook := &vnodePodHook{}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Spec:       corev1.PodSpec{NodeName: "worker-1"},
+	}
+
+	result, err := hook.MutateGetPhysical(context.Background(), pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resultPod := result.(*corev1.Pod)
+	if resultPod != pod {
+		t.Fatalf("expected pod to be mutated in place")
+	}
+	if got := resultPod.Spec.NodeName; got != "worker-1" {
+		t.Fatalf("expected nodeName to remain unchanged, got %q", got)
+	}
+	if resultPod.Labels != nil {
+		t.Fatalf("expected labels to remain nil, got %#v", resultPod.Labels)
 	}
 }
 
@@ -154,6 +230,9 @@ func TestMutateGetPhysicalRejectsNonPod(t *testing.T) {
 	result, err := hook.MutateGetPhysical(context.Background(), &corev1.ConfigMap{})
 	if err == nil {
 		t.Fatal("expected an error for non-pod object")
+	}
+	if got := err.Error(); got != "expected Pod, got *v1.ConfigMap" {
+		t.Fatalf("unexpected error message: %q", got)
 	}
 	if result != nil {
 		t.Fatalf("expected nil result for non-pod object, got %T", result)
