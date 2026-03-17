@@ -1,0 +1,5 @@
+plugins:
+  vnode:
+    name: vnode-plugin
+    image: ghcr.io/kroderdev/vcluster-vnode-plugin:latest
+    imagePullPolicy: IfNotPresent
